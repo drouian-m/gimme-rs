@@ -1,20 +1,13 @@
-use anyhow::Result;
-use clap::Parser;
+#[macro_use]
+extern crate simple_error;
+
+use actix_web::{web, App, HttpServer};
 use std::env;
-use std::str;
+mod api;
 mod storage_manager;
 
-#[derive(Parser)]
-#[clap(about, version, author)]
-struct Args {
-  #[clap(short, long)]
-  filename: String,
-}
-
 #[tokio::main]
-async fn main() -> Result<()> {
-  let args = Args::parse();
-
+async fn main() -> std::io::Result<()> {
   let bucket_name =
     env::var("GIMME_BUCKET").expect("Please set $GIMME_BUCKET environnement variable");
   let bucket_url =
@@ -26,17 +19,23 @@ async fn main() -> Result<()> {
   let secret_key =
     env::var("GIMME_SECRET_KEY").expect("Please set $GIMME_SECRET_KEY environnement variable");
 
-  let store_manager = storage_manager::StorageManager::new(
-    &bucket_name[..],
-    &access_key[..],
-    &secret_key[..],
-    bucket_region,
-    bucket_url,
-  );
+  let data = web::Data::new(api::AppStore {
+    s_manager: storage_manager::StorageManager::new(
+      &bucket_name[..],
+      &access_key[..],
+      &secret_key[..],
+      bucket_region,
+      bucket_url,
+    ),
+  });
 
-  let data = store_manager.get_object(args.filename).await?;
-
-  let string = str::from_utf8(&data).unwrap();
-  println!("File content : {}", string);
-  Ok(())
+  HttpServer::new(move || {
+    App::new()
+      .app_data(data.clone())
+      .service(api::root)
+      .service(api::gimme)
+  })
+  .bind("127.0.0.1:8080")?
+  .run()
+  .await
 }
